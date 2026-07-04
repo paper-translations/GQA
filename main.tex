@@ -1,7 +1,3 @@
-% This must be in the first 5 lines to tell arXiv to use pdfLaTeX, which is strongly recommended.
-\pdfoutput=1
-% In particular, the hyperref package requires pdfLaTeX in order to break URLs across lines.
-
 \documentclass[11pt]{article}
 
 % Remove the "review" option to generate the final version.
@@ -9,17 +5,15 @@
 \usepackage{EMNLP2023}
 
 % Standard package includes
-\usepackage{times}
+\usepackage{xeCJK}
+\usepackage{setspace}
 \usepackage{latexsym}
 
 % For proper rendering and hyphenation of words containing Latin characters (including in bib files)
-\usepackage[T1]{fontenc}
+% \usepackage[T1]{fontenc}
 % For Vietnamese characters
 % \usepackage[T5]{fontenc}
 % See https://www.latex-project.org/help/documentation/encguide.pdf for other character sets
-
-% This assumes your files are encoded as UTF8
-\usepackage[utf8]{inputenc}
 
 % This is not strictly necessary, and may be commented out.
 % However, it will improve the layout of the manuscript,
@@ -34,7 +28,6 @@
 \input{custom_commands.tex}
 
 % Standard package includes
-\usepackage{times}
 \usepackage{latexsym}
 \usepackage{xspace}
 \usepackage{amsmath}
@@ -79,7 +72,20 @@
 
 \def\addlegendimage{\csname pgfplots@addlegendimage\endcsname}
 
-
+\setCJKmainfont[
+  BoldFont=FZHei-B01,
+  ItalicFont=FZKai-Z03,
+  BoldItalicFont=FZFangSong-Z02,
+  SmallCapsFont=FZShuSong-Z01
+]{FZShuSong-Z01}
+\setCJKsansfont[AutoFakeBold=1.2, AutoFakeSlant=0.15]{FZHei-B01}
+\setCJKmonofont[AutoFakeBold=1.2, AutoFakeSlant=0.15]{FZHei-B01}
+\setmainfont{Times New Roman}
+\setmonofont[AutoFakeBold=1.2]{LMMono10}
+\setstretch{1.2}
+\captionsetup{font={small,it,stretch=1.2}}
+\let\oldfootnotesize\footnotesize
+\renewcommand{\footnotesize}{\oldfootnotesize\itshape}
 
 
 % If the title and author information does not fit in the area allocated, uncomment the following
