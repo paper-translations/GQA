@@ -94,10 +94,10 @@
 %
 % and set <dim> to something 5cm or larger.
 
-\title{\gmq: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints}
+\title{\gmq：从 Multi-Head 检查点训练广义 Multi-Query Transformer 模型}
 
 \author{
-Joshua Ainslie\thanks{\- \ Equal contribution.},~ James Lee-Thorp\footnotemark[1],~ Michiel de Jong\footnotemark[1] \ \footnotemark[2]\thanks{\- \ University of Southern California. Work done at Google Research.} \\ 
+Joshua Ainslie\thanks{\- \ 同等贡献。},~ James Lee-Thorp\footnotemark[1],~ Michiel de Jong\footnotemark[1] \ \footnotemark[2]\thanks{\- \ University of Southern California。工作完成于 Google Research。} \\
 {\bf Yury Zemlyanskiy},~ {\bf Federico Lebr\'{o}n},~ {\bf Sumit Sanghai}
   \AND
   {\rm \Large Google Research}\\
@@ -107,120 +107,119 @@ Joshua Ainslie\thanks{\- \ Equal contribution.},~ James Lee-Thorp\footnotemark[1
 \begin{document}
 \maketitle
 \begin{abstract}
-Multi-query attention (\mq), which only uses a single key-value head, drastically speeds up decoder inference. However, \mq can lead to quality degradation, and moreover it may not be desirable to train a separate model just for faster inference. We (1) propose a recipe for uptraining existing multi-head language model checkpoints into models with \mq using 5\% of original pre-training compute, and (2) introduce \fullgmq attention (\gmq), a generalization of multi-query attention which uses an intermediate (more than one, less than number of query heads) number of key-value heads. We show that uptrained \gmq achieves quality close to multi-head attention with comparable speed to \mq.
+Multi-query 注意力 (\mq) 仅使用单个 key-value 头，可显著加速解码器推理。然而，\mq 可能导致质量下降，而且仅为更快推理而单独训练一个模型也未必理想。我们 (1) 提出一种方案，使用原始预训练计算量的 5\%，将已有的 multi-head 语言模型检查点继续训练为采用 \mq 的模型，并且 (2) 引入 \fullgmq 注意力 (\gmq)，它是 multi-query 注意力的一种泛化形式，使用中间数量的 key-value 头，即多于一个但少于 query 头数量。我们表明，经过继续训练的 \gmq 能以接近 \mq 的速度达到接近 multi-head 注意力的质量。
 
 \end{abstract}
 
-\section{Introduction}
+\section{引言}
 \label{section:intro}
 
-Autoregressive decoder inference is a severe bottleneck for Transformer models due to the memory bandwidth overhead from loading decoder weights and all attention keys and values at every decoding step~\citep{shazeer2019mq, palminference, dejong2022fido}. The memory bandwidth from loading keys and values can be sharply reduced through \emph{multi-query attention}~\citep{shazeer2019mq}, which uses multiple query heads but single key and value heads.
+对于 Transformer 模型而言，自回归解码器推理是一个严重瓶颈，因为在每个解码步骤都需要加载解码器权重以及所有注意力的 key 和 value，从而产生内存带宽开销~\citep{shazeer2019mq, palminference, dejong2022fido}。通过 \emph{multi-query 注意力}~\citep{shazeer2019mq}，可以大幅降低加载 key 和 value 所需的内存带宽；该方法使用多个 query 头，但只使用单个 key 头和 value 头。
 
-However, multi-query attention (\mq) can lead to quality degradation and training instability, and it may not be feasible to train separate models optimized for quality and inference. Moreover, while some language models already use multi-query attention, such as PaLM~\citep{palm}, many do not, including publicly available language models such as T5~\citep{t5} and LLaMA~\citep{llama}. 
+然而，multi-query 注意力 (\mq) 可能导致质量下降和训练不稳定，而且分别训练针对质量和推理优化的模型未必可行。此外，尽管一些语言模型已经使用 multi-query 注意力，例如 PaLM~\citep{palm}，但许多模型并未采用，包括 T5~\citep{t5} 和 LLaMA~\citep{llama} 等公开可用的语言模型。
 
-This work contains two contributions for faster inference with large language models. First, we show that language model checkpoints with multi-head attention (\mh) can be \emph{uptrained}~\citep{sparsemoe} to use \mq with a small fraction of original training compute. This presents a cost-effective method to obtain fast multi-query as well as high-quality \mh checkpoints.
+本文围绕大语言模型的更快推理提出两项贡献。首先，我们表明，带有 multi-head 注意力 (\mh) 的语言模型检查点可以用原始训练计算量的一小部分进行 \emph{继续训练}~\citep{sparsemoe}，从而使用 \mq。这提供了一种高性价比的方法，可从高质量的 \mh 检查点获得快速的 multi-query 模型。
 
-Second, we propose \fullgmq attention (\gmq), an interpolation between multi-head and multi-query attention with single key and value heads \emph{per subgroup of query heads}. We show that uptrained \gmq achieves quality close to multi-head attention while being almost as fast as multi-query attention.
+其次，我们提出 \fullgmq 注意力 (\gmq)，它介于 multi-head 和 multi-query 注意力之间，在 \emph{每个 query 头子组}中共享单个 key 头和 value 头。我们表明，经过继续训练的 \gmq 在几乎达到 multi-query 注意力速度的同时，获得接近 multi-head 注意力的质量。
 
-\section{Method}
+\section{方法}
 \label{section:method}
 
 
 
-\subsection{Uptraining}
+\subsection{继续训练}
 
-Generating a multi-query model from a multi-head model takes place in two steps: first, converting the checkpoint, and second, additional pre-training to allow the model to adapt to its new structure. Figure \ref{fig:recycling} shows the process for converting a multi-head checkpoint into a multi-query checkpoint. The projection matrices for key and value heads are mean pooled into single projection matrices, which we find works better than selecting a single key and value head or randomly initializing new key and value heads from scratch.
+从 multi-head 模型生成 multi-query 模型分为两步：首先转换检查点，其次进行额外预训练，使模型适应新的结构。图 \ref{fig:recycling} 展示了将 multi-head 检查点转换为 multi-query 检查点的过程。我们将 key 头和 value 头的投影矩阵平均池化为单个投影矩阵，并发现这比选择单个 key 头和 value 头，或从头随机初始化新的 key 头和 value 头效果更好。
 
 \input{figures/reycling}
 
-The converted checkpoint is then pre-trained for a small proportion $\upprop$ of its original training steps on the same pre-training recipe.
+随后，转换后的检查点使用相同的预训练方案，再训练原始训练步数的一小部分 $\upprop$。
 
-\subsection{\fullgmqcap attention}
+\subsection{\fullgmqcap 注意力}
 \input{figures/gmq_architecture}
-\fullgmqcap attention divides query heads into $G$ \emph{groups}, each of which shares a single key head and value head. \gmq-\textsc{g} refers to \fullgmq with $G$ groups. \gmq-$1$, with a single group and therefore single key and value head, is equivalent to \mq, while \gmq-\textsc{h}, with groups equal to number of heads, is equivalent to \mh. Figure \ref{fig:gmq_architecture} shows a comparison of \fullgmq attention and multi-head/multi-query attention. When converting a multi-head checkpoint to a \gmq checkpoint, we construct each group key and value head by mean-pooling all the original heads within that group.
+\fullgmqcap 注意力将 query 头划分为 $G$ 个 \emph{组}，每组共享一个 key 头和一个 value 头。 \gmq-\textsc{g} 表示具有 $G$ 个组的 \fullgmq。 \gmq-$1$ 只有一个组，因此只有一个 key 头和 value 头，等价于 \mq；而 \gmq-\textsc{h} 的组数等于头数，等价于 \mh。图 \ref{fig:gmq_architecture} 展示了 \fullgmq 注意力与 multi-head/multi-query 注意力的比较。将 multi-head 检查点转换为 \gmq 检查点时，我们通过对该组内所有原始头进行平均池化，构造每个组的 key 头和 value 头。
 
-An intermediate number of groups leads to an interpolated model that is higher quality than \mq but faster than \mh, and, as we will show, represents a favorable trade-off. Going from \mh to \mq reduces $H$ key and value heads to a single key and value head, reducing the size of the key-value cache and therefore amount of data that needs to be loaded by a factor of $H$. However, larger models generally scale the number of heads, such that multi-query attention represents a more aggressive cut in both memory bandwidth and capacity. \gmq lets us keep the same proportional decrease in bandwidth and capacity as model size increases.
+中间数量的组会得到一个插值模型，其质量高于 \mq，速度快于 \mh，并且如我们将展示的那样，形成了有利的权衡。从 \mh 转为 \mq 会将 $H$ 个 key 头和 value 头减少为单个 key 头和 value 头，使 key-value 缓存大小以及需要加载的数据量减少 $H$ 倍。然而，更大的模型通常会增加头数，因此 multi-query 注意力会在内存带宽和容量上带来更激进的削减。 \gmq 使我们能在模型规模增大时，保持带宽和容量按相同比例下降。
 
-Moreover, larger models suffer relatively less from memory bandwidth overhead from attention, as the KV-cache scales with model dimension while model FLOPs and parameters scale with the square of model dimension. Finally, standard sharding for large models replicates the single key and value head by the number of model partitions~\citep{palminference}; \gmq removes the waste from such partitioning. Therefore, we expect \gmq to present a particularly good trade-off for larger models. 
+此外，较大模型受注意力内存带宽开销的相对影响更小，因为 KV-cache 随模型维度线性增长，而模型 FLOPs 和参数随模型维度的平方增长。最后，大模型的标准分片会按照模型分区数量复制单个 key 头和 value 头~\citep{palminference}；\gmq 消除了这种分区方式带来的浪费。因此，我们预期 \gmq 对较大模型会呈现特别好的权衡。
 
-We note that \gmq is not applied to the encoder self-attention layers; encoder representations are computed in parallel, and memory bandwidth is therefore generally not the primary bottleneck.
+需要指出的是，\gmq 并未应用于编码器 self-attention 层；编码器表征是并行计算的，因此内存带宽通常不是主要瓶颈。
 
-\section{Experiments}
+\section{实验}
 \label{section:experiments}
 
-\subsection{Experimental setup}
+\subsection{实验设置}
 
-\paragraph{Configurations}
-All models are based on the T5.1.1 architecture~\citep{t5}, implemented with JAX~\citep{jax}, Flax~\citep{flax}, and Flaxformer\footnote{\url{https://github.com/google/flaxformer}}. For our main experiments we consider T5 Large and XXL with multi-head attention, as well as uptrained versions of T5 XXL with multi-query and grouped-query attention. We use the Adafactor optimizer with the same hyperparameters and learning rate schedule as T5~\citep{t5}. We apply \mq and \gmq to decoder self-attention and cross-attention, but not encoder self-attention.
+\paragraph{配置}
+所有模型均基于 T5.1.1 架构~\citep{t5}，并使用 JAX~\citep{jax}、Flax~\citep{flax} 和 Flaxformer\footnote{\url{https://github.com/google/flaxformer}} 实现。在主要实验中，我们考虑带有 multi-head 注意力的 T5 Large 和 XXL，以及经过继续训练、带有 multi-query 和 grouped-query 注意力的 T5 XXL 版本。我们使用 Adafactor 优化器，并采用与 T5~\citep{t5} 相同的超参数和学习率调度。我们将 \mq 和 \gmq 应用于解码器 self-attention 和 cross-attention，但不应用于编码器 self-attention。
 
-\paragraph{Uptraining}
+\paragraph{继续训练}
 
-Uptrained models are initialized from public T5.1.1 checkpoints. The key and value heads are mean-pooled to the appropriate \mq or \gmq structure, and then pre-trained for a further 
-$\upprop$ proportion of original pre-training steps with the original pre-training setup and dataset from~\citep{t5}. For $\upprop=0.05$, training took approximately 600 TPUv3 chip-days.
+继续训练模型从公开的 T5.1.1 检查点初始化。key 头和 value 头被平均池化为相应的 \mq 或 \gmq 结构，随后使用来自~\citep{t5} 的原始预训练设置和数据集，再训练原始预训练步数的 $\upprop$ 比例。当 $\upprop=0.05$ 时，训练大约需要 600 个 TPUv3 芯片日。
 
-\paragraph{Data}
-We evaluate on summarization datasets CNN/Daily Mail~\citep{cnn}, arXiv and PubMed~\citep{arxiv}, MediaSum~\citep{mediasum}, and Multi-News~\citep{multinews}; translation dataset WMT 2014  English-to-German; and question answering dataset TriviaQA~\citep{triviaqa}. We do not evaluate on popular classification benchmarks such as GLUE~\citep{glue} as autoregressive inference is less applicable for those tasks. 
+\paragraph{数据}
+我们在摘要数据集 CNN/Daily Mail~\citep{cnn}、arXiv 和 PubMed~\citep{arxiv}、MediaSum~\citep{mediasum} 以及 Multi-News~\citep{multinews}，翻译数据集 WMT 2014 English-to-German，以及问答数据集 TriviaQA~\citep{triviaqa} 上进行评估。我们没有在 GLUE~\citep{glue} 等常用分类基准上评估，因为自回归推理不太适用于这些任务。
 
-\paragraph{Fine-tuning}
+\paragraph{微调}
 
-For fine-tuning, we use a constant learning rate of 0.001, batch size 128, and dropout rate 0.1 for all tasks. CNN/Daily Mail and WMT use input length of 512 and output length 256. Other summarization datasets use input length 2048 and output length 512. Finally, TriviaQA uses input length 2048 and output length 32. We train until convergence and select the checkpoint with the highest dev performance. We use greedy decoding for inference.
+对于微调，所有任务均使用 0.001 的恒定学习率、128 的批大小和 0.1 的 dropout 率。CNN/Daily Mail 和 WMT 使用输入长度 512、输出长度 256。其他摘要数据集使用输入长度 2048、输出长度 512。最后，TriviaQA 使用输入长度 2048、输出长度 32。我们训练至收敛，并选择开发集性能最高的检查点。推理时使用贪心解码。
 
-\paragraph{Timing}
-We report time per sample per TPUv4 chip, as measured by xprof~\citep{xprof}. For timing experiments we use 8 TPUs with the largest batch size that fits up to 32 per TPU, and parallelization optimized separately for each model.
+\paragraph{计时}
+我们报告每个 TPUv4 芯片上每个样本的时间，该时间由 xprof~\citep{xprof} 测得。在计时实验中，我们使用 8 个 TPU，并采用每个 TPU 最多可容纳 32 个样本的最大批大小，同时为每个模型分别优化并行化设置。
 \input{tables/main_results}
 \input{figures/results}
-\subsection{Main results}
+\subsection{主要结果}
 
-Figure \ref{fig:perf_vs_time} shows average performance over all datasets as a function of average inference time for \mh T5-Large and T5-XXL, and uptrained \mq and \gmq-$8$ XXL models with uptraining proportion $\upprop = 0.05$. We see that a larger uptrained \mq model provides a favorable trade-off relative to \mh models, with higher quality and faster inference than \mh-Large. Moreover, \gmq achieves significant additional quality gains, achieving performance close to \mh-XXL with speed close to \mq. Table \ref{table:headline_results} contains full results for all datasets.
-
-
+图 \ref{fig:perf_vs_time} 展示了 \mh T5-Large 和 T5-XXL，以及继续训练比例 $\upprop = 0.05$ 的 \mq 和 \gmq-$8$ XXL 模型，在所有数据集上平均性能随平均推理时间变化的关系。我们可以看到，相比 \mh 模型，更大的继续训练 \mq 模型提供了有利的权衡，其质量高于 \mh-Large，推理也更快。此外，\gmq 带来了显著的额外质量收益，在接近 \mq 速度的同时达到接近 \mh-XXL 的性能。表 \ref{table:headline_results} 给出了所有数据集的完整结果。
 
 
-\subsection{Ablations}
 
-This section presents experiments to investigate the effect of different modeling choices. We evaluate performance on a representive subsample of tasks: CNN/Daily Mail, (short-form summarization), MultiNews (long-form summarization), and TriviaQA (question-answering).
+
+\subsection{消融实验}
+
+本节通过实验研究不同建模选择的影响。我们在具有代表性的任务子集上评估性能：CNN/Daily Mail，即 short-form summarization；MultiNews，即 long-form summarization；以及 TriviaQA，即 question-answering。
 \input{figures/conversion_methods}
 
-\paragraph{Checkpoint conversion}
-Figure \ref{fig:conversion_methods} compares the performance of different methods for checkpoint conversion. Mean pooling appears to work best, followed by selecting a single head and then random initialization. Intuitively, results are ordered by the degree to which information is preserved from the pre-trained model.
+\paragraph{检查点转换}
+图 \ref{fig:conversion_methods} 比较了不同检查点转换方法的性能。平均池化的效果似乎最好，其次是选择单个头，然后是随机初始化。直观来看，结果排序与从预训练模型中保留信息的程度一致。
 
 
 
-\paragraph{Uptraining steps}
-Figure \ref{fig:uptraining_steps} shows how performance varies with uptraining proportion for T5 XXL with \mq and \gmq. First, we note that \gmq already achieves reasonable performance after conversion while \mq requires uptraining to be useful. Both \mq and \gmq gain from 5\% uptraining with diminishing returns from 10\%.
+\paragraph{继续训练步数}
+图 \ref{fig:uptraining_steps} 展示了带有 \mq 和 \gmq 的 T5 XXL 性能如何随继续训练比例变化。首先，我们注意到 \gmq 在转换后已经达到合理性能，而 \mq 需要继续训练才具备实用性。 \mq 和 \gmq 都能从 5\% 的继续训练中获益，但从 10\% 开始收益递减。
 
 \input{figures/uptraining_steps}
 
-\paragraph{Number of groups}
+\paragraph{组数}
 
-Figure \ref{fig:time_groups} demonstrates the effect of the number of \gmq groups on inference speed. For larger models the memory bandwidth overhead from the KV cache is less constraining~\citep{shazeer2019mq}, while the reduction in key-value size is sharper due to the increased number of heads. As a result, increasing the number of groups from \mq only results in modest slowdowns initially, with increasing cost as we move closer to \mh. We selected 8 groups as a favorable middle ground.
+图 \ref{fig:time_groups} 展示了 \gmq 组数对推理速度的影响。对于较大模型，KV cache 带来的内存带宽开销约束较弱~\citep{shazeer2019mq}，而由于头数增加，key-value 大小的减少更加显著。因此，从 \mq 开始增加组数最初只会带来轻微减速，但随着接近 \mh，成本会逐渐上升。我们选择 8 个组作为较优的折中点。
 
 
 \input{figures/time_vs_groups}
 
 
-\section{Related Work}
+\section{相关工作}
 
-This work is focused on achieving a better trade-off between decoder quality and inference time through reducing the memory bandwidth overhead~\citep{roofline} from loading keys and values. \citet{shazeer2019mq} first proposed reducing this overhead through multi-query attention. Follow-up work showed that multi-query attention is especially helpful for long inputs~\citep{palminference, dejong2022fido}. \citet{gqamrabe} independently developed GQA with public implementation. Other works have explored grouping attention heads for computational efficiency~\citep{grouptrans, gmha, pillars} without focusing specifically on key-value heads, which determine memory bandwidth overhead.
+本文聚焦于通过降低加载 key 和 value 产生的内存带宽开销~\citep{roofline}，在解码器质量和推理时间之间取得更好的权衡。 \citet{shazeer2019mq} 最早提出通过 multi-query 注意力降低这种开销。后续工作表明，multi-query 注意力对长输入尤其有帮助~\citep{palminference, dejong2022fido}。 \citet{gqamrabe} 独立开发了 GQA 并提供了公开实现。其他工作也探索了为计算效率而对注意力头分组~\citep{grouptrans, gmha, pillars}，但没有特别关注决定内存带宽开销的 key-value 头。
 
-A number of other methods have been proposed to reduce memory bandwidth overhead from keys and values, as well as parameters. Flash attention~\citep{flashattention} structures the attention computation to avoid materializing the quadratic attention scores, reducing memory and speeding up training. Quantization~\citep{int8, gptq} reduces the size of weights and activations, including keys and values, by lowering precision. Model distillation~\citep{distill, distillsurvey} instead reduces model size at a given precision, using data generated from the larger model to finetune the smaller model. Layer-sparse cross-attention \citep{dejong2022fido} eliminates most cross-attention layers which make up the primary expense for longer inputs. Speculative sampling~\citep{specchen, specleviathan} ameliorates the memory bandwidth bottleneck by proposing multiple tokens with a smaller model which are then scored in parallel by a larger model. 
+已有许多其他方法被提出，用于降低来自 key、value 以及参数的内存带宽开销。Flash 注意力~\citep{flashattention} 通过组织注意力计算来避免物化二次规模的注意力分数，从而减少内存并加速训练。量化~\citep{int8, gptq} 通过降低精度来减小权重和激活的大小，其中也包括 key 和 value。模型蒸馏~\citep{distill, distillsurvey} 则在给定精度下降低模型大小，使用由较大模型生成的数据来微调较小模型。Layer-sparse cross-attention \citep{dejong2022fido} 移除了大多数 cross-attention 层，而这些层构成长输入的主要开销。Speculative sampling~\citep{specchen, specleviathan} 使用较小模型提出多个 token，再由较大模型并行打分，从而缓解内存带宽瓶颈。
 
-Finally, the uptraining procedure we propose is inspired by \citet{sparsemoe}, which uptrains standard T5 checkpoints into sparsely activated Mixture-of-Experts models.
+最后，我们提出的继续训练过程受到 \citet{sparsemoe} 的启发，该工作将标准 T5 检查点继续训练为稀疏激活的 Mixture-of-Experts 模型。
 
 \label{section:related}
 
-\section{Conclusion}
+\section{结论}
 \label{section:conclusion}
 
-Language models are expensive for inference primarily due to the memory bandwidth overhead from loading keys and values. Multi-query attention reduces this overhead at the cost of decreased model capacity and quality. We propose to convert multi-head attention models to multi-query models with a small fraction of original pre-training compute. Moreover, we introduce grouped-query attention, an interpolation of multi-query and multi-head attention that achieves quality close to multi-head at comparable speed to multi-query attention. 
+语言模型的推理成本高，主要是因为加载 key 和 value 会带来内存带宽开销。Multi-query 注意力以降低模型容量和质量为代价减少了这种开销。我们提出使用原始预训练计算量的一小部分，将 multi-head 注意力模型转换为 multi-query 模型。此外，我们引入 grouped-query 注意力，它介于 multi-query 和 multi-head 注意力之间，能够以接近 multi-query 注意力的速度达到接近 multi-head 的质量。
 
-\section*{Limitations}
+\section*{局限性}
 
-This paper focuses on ameliorating the memory bandwidth overhead from loading keys and values. This overhead is most important when generating longer sequences, for which quality is inherently difficult to evaluate. For summarization we employ Rouge score, which we know is a flawed evaluation that does not tell the whole story; for that reason, it is difficult to be certain our trade-offs are correct. Due to limited computation, we also do not compare our XXL \gmq model to a comparitive model trained from scratch, so we do not know the relative performance of uptraining vs training from scratch. Finally, we evaluate the impact of uptraining and \gmq only on encoder-decoder models. Recently, decoder-only models are extremely popular, and since these models do not have separate self-attention and cross-attention, we expect \gmq to have a stronger advantage over \mq.
+本文聚焦于缓解加载 key 和 value 产生的内存带宽开销。当生成较长序列时，这种开销最为重要，而此类序列的质量本身也难以评估。对于摘要任务，我们使用 Rouge 分数，但我们知道这是一种有缺陷的评估，无法呈现完整情况；因此，很难确定我们的权衡一定正确。由于计算资源有限，我们也没有将 XXL \gmq 模型与从头训练的可比模型进行比较，因此无法得知继续训练相对于从头训练的相对性能。最后，我们仅在 encoder-decoder 模型上评估了继续训练和 \gmq 的影响。近来，decoder-only 模型极为流行，并且由于这些模型没有分离的 self-attention 和 cross-attention，我们预期 \gmq 相比 \mq 会有更强优势。
 
 
-\section*{Acknowlegements}
-We thank Santiago Onta\~{n}\'{o}n, Afroz Mohiuddin, William Cohen and others at Google Research for insightful advice and discussion. 
+\section*{致谢}
+我们感谢 Santiago Onta\~{n}\'{o}n、Afroz Mohiuddin、William Cohen 以及 Google Research 的其他同事提供富有洞见的建议与讨论。
 
 \bibliography{custom}
 \bibliographystyle{acl_natbib}
@@ -229,8 +228,8 @@ We thank Santiago Onta\~{n}\'{o}n, Afroz Mohiuddin, William Cohen and others at 
 \clearpage
 \appendix
 
-\section{Training Stability}
+\section{训练稳定性}
 
-We find that multi-query attention can lead to training instability during fine-tuning, in particular combined with long input tasks. We trained multiple T5-Large models with multi-query attention from scratch. In each case, pre-training suffered from frequent loss spikes and the final models diverged immediately when fine-tuning on long-input tasks. Uptrained multi-query attention models are more stable but still display high variance, so for multi-query models on unstable tasks we report average performance over three fine-tuning runs. Uptrained grouped-query attention models, however, appear to be stable, so we did not investigate futher on the root causes of multi-query instability.
+我们发现，multi-query 注意力可能在微调期间导致训练不稳定，尤其是在与长输入任务结合时。我们从头训练了多个带有 multi-query 注意力的 T5-Large 模型。每种情况下，预训练都会出现频繁的损失尖峰，并且最终模型在长输入任务上微调时会立即发散。经过继续训练的 multi-query 注意力模型更稳定，但仍表现出较高方差，因此对于不稳定任务上的 multi-query 模型，我们报告三次微调运行的平均性能。然而，经过继续训练的 grouped-query 注意力模型似乎是稳定的，因此我们没有进一步研究 multi-query 不稳定性的根本原因。
 
 \end{document}
