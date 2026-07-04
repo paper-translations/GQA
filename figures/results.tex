@@ -31,6 +31,6 @@ legend style={
 \node at (axis cs:0.275,47.136) [anchor= north west, color=darkgrey] {\small{GQA-XXL}};            
 \end{axis}
 \end{tikzpicture}
-    \caption{{\bf Uptrained \mq yields a favorable tradeoff compared to \mh with higher quality and faster speed than \mh-Large, and \gmq achieves even better performance with similar speed gains and comparable quality to \mh-XXL.} Average performance on all tasks as a function of average inference time per sample for T5-Large and T5-XXL with multi-head attention, and 5\% uptrained T5-XXL with \mq and \gmq-8 attention.}
+    \caption{{\bf 与 \mh 相比，经过继续训练的 \mq 实现了有利的权衡，其质量高于且速度快于 \mh-Large，而 \gmq 在获得相近速度提升的同时实现了更好的性能，质量与 \mh-XXL 相当。} 对采用 multi-head 注意力的 T5-Large 和 T5-XXL，以及经过 5\% 继续训练、采用 \mq 和 \gmq-8 注意力的 T5-XXL，展示所有任务平均性能随每个样本平均推理时间的变化。}
     \label{fig:perf_vs_time}
 \end{figure}
